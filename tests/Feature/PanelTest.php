@@ -456,6 +456,49 @@ class PanelTest extends TestCase
         $this->assertSame(1, $site->commands()->count());
     }
 
+    public function test_apply_env_command_is_valid_and_queued_as_a_site_command(): void
+    {
+        $site = $this->activeServer()->sites()->create(['domain' => 'env.test', 'status' => 'active', 'project_type' => 'laravel', 'php_version' => '8.4']);
+
+        $script = SiteScripts::command($site, SiteScripts::APPLY_ENV_COMMAND);
+        $this->assertBashSyntax($script, 'apply env');
+        $this->assertStringContainsString('php artisan config:cache', $script);
+        $this->assertStringContainsString('php artisan queue:restart', $script);
+        $this->assertStringContainsString("export DEPLOI_PHP_FPM='php8.4-fpm'", $script);
+        // Saving .env itself writes over a live SSH connection, so the controller isn't exercised here.
+    }
+
+    public function test_queue_worker_uses_its_queue_connection_not_the_database_connection(): void
+    {
+        $site = $this->activeServer()->sites()->create(['domain' => 'qw.test', 'status' => 'active', 'project_type' => 'laravel', 'php_version' => '8.4']);
+        $worker = $site->queueWorkers()->create(['connection' => 'database', 'queue' => 'deployments,default', 'processes' => 3, 'timeout' => 3700]);
+
+        // Regression: this used to render "queue:work sqlite/mysql" (Eloquent's DB connection name).
+        $this->assertStringContainsString('queue:work database --queue=deployments,default', $worker->fresh()->command());
+
+        // ...and the Supervisor config written to the server (it travels base64-encoded)
+        preg_match("/echo '([^']+)' \\| base64 -d > '\\/etc\\/supervisor/", ServerScripts::writeQueueWorker($worker->fresh()), $m);
+        $this->assertStringContainsString('queue:work database --queue=deployments,default', base64_decode($m[1]));
+    }
+
+    public function test_env_values_are_never_glued_onto_the_last_line(): void
+    {
+        $dir = sys_get_temp_dir().'/deploi-env-'.uniqid();
+        mkdir($dir);
+        $env = "{$dir}/.env";
+
+        // A file without a trailing newline - exactly what the browser editor used to save.
+        file_put_contents($env, "APP_NAME=Deploi\nREDIS_QUEUE_RETRY_AFTER=3800");
+        $script = SiteScripts::setEnvValues($env, ['DB_QUEUE_RETRY_AFTER' => '3800', 'APP_NAME' => 'Renamed']);
+        exec('bash -c '.escapeshellarg("set -eo pipefail\n".$script).' 2>&1', $out, $code);
+
+        $this->assertSame(0, $code, implode("\n", $out));
+        $this->assertSame("APP_NAME=Renamed\nREDIS_QUEUE_RETRY_AFTER=3800\nDB_QUEUE_RETRY_AFTER=3800\n", file_get_contents($env));
+
+        unlink($env);
+        rmdir($dir);
+    }
+
     public function test_git_host_is_inferred_when_no_tile_was_submitted(): void
     {
         $server = $this->activeServer();

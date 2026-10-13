@@ -11,7 +11,7 @@
                     <tbody class="divide-y divide-slate-100">
                     @foreach($workers as $worker)
                         <tr>
-                            <td>{{ $worker->connection }}</td>
+                            <td>{{ $worker->queueConnection() }}</td>
                             <td class="font-mono text-xs">{{ $worker->queue }}</td>
                             <td>{{ $worker->processes }}</td>
                             <td>{{ $worker->timeout }}s</td>

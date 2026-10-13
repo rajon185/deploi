@@ -251,18 +251,36 @@ class SiteController extends Controller
 
     public function updateEnvironment(Request $request, Site $site)
     {
-        $data = $request->validate(['contents' => ['nullable', 'string', 'max:100000']]);
+        $data = $request->validate(['contents' => ['nullable', 'string', 'max:100000'], 'apply' => ['boolean']]);
         $path = SiteScripts::envPath($site);
 
         try {
             $ssh = $site->server->ssh();
-            $ssh->put($path, str_replace("\r\n", "\n", $data['contents'] ?? ''), 0640);
+            // Browsers drop the textarea's final newline; put it back so later appends stay on their own line.
+            $contents = rtrim(str_replace("\r\n", "\n", $data['contents'] ?? ''), "\n");
+            $ssh->put($path, $contents === '' ? '' : $contents."\n", 0640);
             $ssh->exec('chown '.Bash::q("{$site->system_user}:{$site->system_user}").' '.Bash::q($path))->throw();
         } catch (Throwable $e) {
             return back()->with('error', 'Could not save .env: '.$e->getMessage());
         }
 
-        return back()->with('success', '.env saved. Deploy (or run "php artisan config:cache") for changes to take effect.');
+        if (! $site->isLaravel()) {
+            return back()->with('success', '.env saved. Restart or redeploy the app if it only reads .env on start-up.');
+        }
+
+        if (! $request->boolean('apply')) {
+            return back()->with('success', '.env saved. Run "php artisan config:cache" (Commands tab) or deploy for changes to take effect.');
+        }
+
+        // Laravel only sees the new values once a cached config is rebuilt, and queue workers keep
+        // the old ones until they restart. Logged in the Commands tab so the output is visible.
+        $command = $site->commands()->create(['user_id' => $request->user()->id, 'command' => SiteScripts::APPLY_ENV_COMMAND]);
+        $task = $site->server->runTask("Apply .env on {$site->domain}", SiteScripts::command($site, SiteScripts::APPLY_ENV_COMMAND), [
+            'user' => $site->system_user, 'subject' => $command, 'on_finish' => null, 'timeout' => 120,
+        ]);
+        $command->update(['server_task_id' => $task->id]);
+
+        return back()->with('success', '.env saved. Rebuilding the config cache and restarting queue workers - output is in the Commands tab.');
     }
 
     // ------------------------------------------------------------ Logs

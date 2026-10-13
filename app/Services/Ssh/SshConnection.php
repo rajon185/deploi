@@ -123,11 +123,12 @@ class SshConnection
     {
         try {
             $this->ssh?->disconnect();
+            // Releasing the object runs phpseclib's own destructor, which can throw the same way.
+            $this->ssh = null;
         } catch (\Throwable) {
             // During PHP shutdown phpseclib's constants may already be gone; the socket closes anyway.
+            $this->ssh = null;
         }
-
-        $this->ssh = null;
     }
 
     public function __destruct()

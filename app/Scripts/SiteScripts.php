@@ -167,7 +167,8 @@ BASH;
     public static function setEnvValues(string $envPath, array $values, array $onlyIfEmpty = []): string
     {
         $env = Bash::q($envPath);
-        $script = "touch {$env}\n";
+        // Make sure the file ends with a newline, or an appended KEY=value is glued onto the last line.
+        $script = "touch {$env}\nif [ -s {$env} ] && [ -n \"\$(tail -c1 {$env})\" ]; then echo >> {$env}; fi\n";
 
         foreach ($values as $key => $value) {
             $line = Bash::q("{$key}={$value}");
@@ -269,6 +270,17 @@ echo "Release \$RELEASE is live."
 BASH;
     }
 
+    /** Run after saving a Laravel site's .env so the new values take effect without a deploy. */
+    public const APPLY_ENV_COMMAND = <<<'BASH'
+if [ -f bootstrap/cache/config.php ]; then
+    php artisan config:cache
+else
+    echo "Config isn't cached - the new .env is used from the next request."
+fi
+php artisan queue:restart
+sudo -n /usr/sbin/service "$DEPLOI_PHP_FPM" reload 2>/dev/null || true
+BASH;
+
     /**
      * An ad-hoc command run from the site's Commands tab, in the live directory as the site user.
      * "php" and "composer" resolve to the site's own PHP version rather than the server CLI default.
@@ -281,6 +293,7 @@ BASH;
             'DEPLOI_SITE_PATH' => $site->path(),
             'DEPLOI_DOMAIN' => $site->domain,
             'DEPLOI_PHP' => $php,
+            'DEPLOI_PHP_FPM' => $php.'-fpm',
             'DEPLOI_COMPOSER' => $php.' /usr/local/bin/composer',
         ])->map(fn ($v, $k) => "export {$k}=".Bash::q($v))->implode("\n");
 
