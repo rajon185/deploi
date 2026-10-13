@@ -9,13 +9,13 @@ Deploi creates servers at your cloud provider (or takes over any Ubuntu box you 
 | Area | What you can do |
 | --- | --- |
 | **Servers** | Create at **DigitalOcean**, **Hetzner Cloud**, **Vultr** or **Linode/Akamai** via their APIs, or add a **custom server** (any Ubuntu 22.04/24.04 VPS: AWS, OVH, an existing droplet…) over SSH. Types: web server, database server, worker, load balancer. Live provisioning progress, server stats (load, RAM, disk, uptime), reboot, destroy at provider. |
-| **Provisioning** | Nginx, PHP 7.4–8.4 (ondrej PPA), Composer, MySQL 8 / MariaDB / PostgreSQL, Redis, Node.js 22, Supervisor, UFW firewall, fail2ban, Certbot, swap, unattended security upgrades, a `deploi` deploy user with its own SSH key. |
+| **Provisioning** | Nginx, PHP 7.4–8.5 (ondrej PPA), Composer, MySQL 8 / MariaDB / PostgreSQL, Redis, Node.js 22, Supervisor, UFW firewall, fail2ban, Certbot, swap, unattended security upgrades, a `deploi` deploy user with its own SSH key. |
 | **Sites** | Laravel, generic PHP, WordPress, static/SPA and Node.js (reverse proxy). Aliases, per-site PHP version, web directory, redirects. |
 | **Deployments** | GitHub, GitLab (incl. self-hosted), Bitbucket or any Git URL. Editable deploy script, **zero-downtime deployments** with releases + one-click rollback, live deployment logs, deploy webhooks with branch filtering, automatic push webhooks, `.env` editor. |
 | **SSL** | Free Let's Encrypt certificates (auto-renewing) or upload your own. |
 | **Databases** | Create databases and users, manage grants, reveal passwords, **scheduled backups to S3-compatible storage** (AWS S3, DO Spaces, Backblaze B2, Wasabi, MinIO) with retention. |
 | **Server tools** | Cron jobs, Supervisor daemons, Laravel queue workers, UFW firewall rules, SSH keys, service restarts, install/uninstall PHP versions, switch CLI PHP. Every action is logged in the server's **task log** with full output. |
-| **Account** | Cloud + source-control credentials (encrypted), reusable SSH keys, Slack / Discord / webhook notifications, REST API with tokens. |
+| **Account** | Two-factor login with any authenticator app (plus one-time recovery codes), cloud + source-control credentials (encrypted), reusable SSH keys, Slack / Discord / webhook notifications, REST API with tokens. |
 
 ## Existing servers and websites
 
@@ -146,6 +146,8 @@ Controller ──► Server::runTask(name, script) ──► server_tasks row �
 Each server gets its own Ed25519 key pair; the private key, sudo password, database password and all provider tokens are encrypted with `APP_KEY`. **Back up your `.env`**, because losing `APP_KEY` means losing access to every server.
 
 ## Production notes
+
+- Turn on two-factor authentication (**Profile → Two-factor authentication**). Deploi holds root keys for every server, so the account is worth protecting. Save the recovery codes: if you lose your phone and the codes, recover the account with `php artisan tinker` by setting `two_factor_secret` and `two_factor_confirmed_at` to `null` for your user.
 
 - Run behind HTTPS and set `APP_ENV=production`, `APP_DEBUG=false`, `APP_URL`/`DEPLOI_WEBHOOK_URL` to the public URL.
 - Keep `REDIS_QUEUE_RETRY_AFTER` (default 3800) larger than the longest job, otherwise Redis hands a running provision to a second worker.

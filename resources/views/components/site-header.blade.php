@@ -7,6 +7,7 @@
         'ssl' => ['SSL', route('sites.ssl', $site)],
     ];
     if ($site->isLaravel()) $tabs['queue'] = ['Queue', route('sites.queue', $site)];
+    $tabs['commands'] = ['Commands', route('sites.commands', $site)];
     $tabs['logs'] = ['Logs', route('sites.logs', $site)];
     $tabs['settings'] = ['Settings', route('sites.settings', $site)];
 @endphp
@@ -25,7 +26,7 @@
                 @if($site->usesPhp())<span>PHP {{ $site->phpVersion() }}</span>@endif
                 @if($site->repository)<span>{{ $site->repository }} @ {{ $site->branch }}</span>@endif
                 @if($site->zero_downtime)<span>Zero-downtime</span>@endif
-                <a href="http{{ $site->ssl_status === 'active' ? 's' : '' }}://{{ $site->domain }}" target="_blank" class="text-indigo-600 hover:underline">Visit ↗</a>
+                <a href="{{ $site->visitUrl() }}" target="_blank" rel="noopener" class="text-indigo-600 hover:underline" title="{{ $site->visitUrl() }}">Visit ↗</a>
             </p>
         </div>
         {{ $slot }}

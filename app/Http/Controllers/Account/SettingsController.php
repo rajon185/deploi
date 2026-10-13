@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\BackupDisk;
 use App\Models\NotificationChannel;
 use App\Models\SshKey;
+use App\Services\TwoFactor;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
@@ -15,9 +16,16 @@ class SettingsController extends Controller
 {
     // ------------------------------------------------------------ Profile
 
-    public function profile()
+    public function profile(TwoFactor $twoFactor)
     {
-        return view('account.profile', ['user' => auth()->user()]);
+        $user = auth()->user();
+        $settingUp = $user->two_factor_secret && ! $user->two_factor_confirmed_at;
+
+        return view('account.profile', [
+            'user' => $user,
+            'twoFactorSettingUp' => $settingUp,
+            'twoFactorQr' => $settingUp ? $twoFactor->qrCodeSvg($user, $user->two_factor_secret) : null,
+        ]);
     }
 
     public function updateProfile(Request $request)

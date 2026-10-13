@@ -184,6 +184,7 @@
                     <div x-show="type !== 'nodejs'">
                         <label class="label" for="web_directory">Web directory</label>
                         <input class="input" id="web_directory" name="web_directory" :value="type === 'laravel' ? '/public' : (type === 'static' ? '/dist' : '/')">
+                        <p class="hint">Relative to the site folder (<span class="code">/home/{{ $server->system_user }}/&lt;domain&gt;</span>).</p>
                     </div>
                     <div x-show="type === 'nodejs'" x-cloak>
                         <label class="label" for="app_port">App port</label>

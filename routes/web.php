@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Account\ProviderController;
 use App\Http\Controllers\Account\SettingsController;
+use App\Http\Controllers\Account\TwoFactorController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Server\CronjobController;
@@ -14,6 +15,7 @@ use App\Http\Controllers\Server\SshKeyController;
 use App\Http\Controllers\Server\TaskController;
 use App\Http\Controllers\ServerController;
 use App\Http\Controllers\Site\CertificateController;
+use App\Http\Controllers\Site\CommandController;
 use App\Http\Controllers\Site\QueueWorkerController;
 use App\Http\Controllers\SiteController;
 use App\Http\Controllers\WebhookController;
@@ -27,6 +29,8 @@ Route::middleware('guest')->group(function () {
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
     Route::get('/register', [AuthController::class, 'showRegister'])->name('register');
     Route::post('/register', [AuthController::class, 'register']);
+    Route::get('/two-factor-challenge', [AuthController::class, 'showTwoFactorChallenge'])->name('two-factor.challenge');
+    Route::post('/two-factor-challenge', [AuthController::class, 'twoFactorChallenge'])->middleware('throttle:5,1');
 });
 
 Route::middleware('auth')->group(function () {
@@ -114,7 +118,10 @@ Route::middleware('auth')->group(function () {
         Route::put('/environment', [SiteController::class, 'updateEnvironment'])->name('environment.update');
 
         Route::get('/logs', [SiteController::class, 'logs'])->name('logs');
+        Route::get('/commands', [CommandController::class, 'index'])->name('commands');
+        Route::post('/commands', [CommandController::class, 'store'])->name('commands.store')->middleware('throttle:30,1');
         Route::get('/settings', [SiteController::class, 'settings'])->name('settings');
+        Route::put('/domain', [SiteController::class, 'updateDomain'])->name('domain.update');
         Route::post('/scheduler', [SiteController::class, 'addLaravelScheduler'])->name('scheduler');
         Route::post('/redirects', [SiteController::class, 'storeRedirect'])->name('redirects.store');
         Route::delete('/redirects/{redirect}', [SiteController::class, 'destroyRedirect'])->name('redirects.destroy');
@@ -134,6 +141,11 @@ Route::middleware('auth')->group(function () {
     Route::prefix('/account')->name('account.')->group(function () {
         Route::get('/profile', [SettingsController::class, 'profile'])->name('profile');
         Route::put('/profile', [SettingsController::class, 'updateProfile'])->name('profile.update');
+
+        Route::post('/two-factor', [TwoFactorController::class, 'enable'])->name('two-factor.enable');
+        Route::post('/two-factor/confirm', [TwoFactorController::class, 'confirm'])->name('two-factor.confirm')->middleware('throttle:10,1');
+        Route::post('/two-factor/recovery-codes', [TwoFactorController::class, 'regenerateRecoveryCodes'])->name('two-factor.recovery-codes');
+        Route::delete('/two-factor', [TwoFactorController::class, 'disable'])->name('two-factor.disable');
 
         Route::get('/providers', [ProviderController::class, 'index'])->name('providers');
         Route::post('/server-providers', [ProviderController::class, 'storeServerProvider'])->name('server-providers.store');

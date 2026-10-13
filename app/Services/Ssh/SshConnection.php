@@ -121,7 +121,12 @@ class SshConnection
 
     public function disconnect(): void
     {
-        $this->ssh?->disconnect();
+        try {
+            $this->ssh?->disconnect();
+        } catch (\Throwable) {
+            // During PHP shutdown phpseclib's constants may already be gone; the socket closes anyway.
+        }
+
         $this->ssh = null;
     }
 

@@ -42,7 +42,7 @@ class SiteController extends Controller
             'domain' => strtolower($data['domain']),
             'aliases' => $aliases,
             'project_type' => $data['project_type'],
-            'web_directory' => '/'.trim($data['web_directory'] ?? ($data['project_type'] === 'laravel' ? 'public' : ''), '/'),
+            'web_directory' => $this->normalizeWebDirectory($data['web_directory'] ?? ($data['project_type'] === 'laravel' ? 'public' : ''), "/home/{$server->system_user}/".strtolower($data['domain'])),
             'php_version' => $data['php_version'] ?? $server->php_version,
             'app_port' => $data['app_port'] ?? null,
             'zero_downtime' => $request->boolean('zero_downtime'),
@@ -311,7 +311,7 @@ class SiteController extends Controller
 
         $site->update([
             'aliases' => $this->parseAliases($data['aliases'] ?? ''),
-            'web_directory' => '/'.trim($data['web_directory'] ?? '', '/'),
+            'web_directory' => $this->normalizeWebDirectory($data['web_directory'] ?? '', $site->path()),
             'php_version' => $data['php_version'] ?? $site->php_version,
             'app_port' => $data['app_port'] ?? $site->app_port,
             'keep_releases' => $data['keep_releases'] ?? $site->keep_releases,
@@ -320,6 +320,54 @@ class SiteController extends Controller
         $this->rewriteNginx($site);
 
         return back()->with('success', 'Settings saved - Nginx is being updated.');
+    }
+
+    /**
+     * Change the site's primary domain (its name in Deploi) and/or its "Visit" link.
+     * The site keeps its folder, certificates and webhook URL.
+     */
+    public function updateDomain(Request $request, Site $site)
+    {
+        $data = $request->validate([
+            'domain' => ['required', 'string', 'regex:'.self::DOMAIN_REGEX,
+                Rule::unique('sites')->where('server_id', $site->server_id)->ignore($site->id)],
+            'keep_old_as_alias' => ['boolean'],
+            'visit_url' => ['nullable', 'url:http,https', 'max:255'],
+        ], ['visit_url.url' => 'The visit link must be a full URL starting with http:// or https://.']);
+
+        $site->visit_url = $data['visit_url'] ?: null;
+        $newDomain = strtolower($data['domain']);
+        $oldDomain = $site->domain;
+
+        if ($newDomain === $oldDomain) {
+            $site->save();
+
+            return back()->with('success', 'Visit link saved.');
+        }
+
+        // Pin everything that was derived from the old domain, so renaming moves nothing on disk.
+        $site->directory ??= $site->path();
+        foreach ($site->certificates as $certificate) {
+            $certificate->update(['cert_name' => $certificate->name()]);
+        }
+
+        $aliases = collect($site->aliases ?? [])->reject(fn ($a) => $a === $newDomain);
+        if ($request->boolean('keep_old_as_alias')) {
+            $aliases->prepend($oldDomain);
+        }
+
+        $site->domain = $newDomain;
+        $site->aliases = $aliases->unique()->values()->all();
+        $site->save();
+
+        if ($site->managesWebserverConfig()) {
+            $site->load('redirects');
+            $site->server->runTask("Rename {$oldDomain} to {$newDomain}", SiteScripts::renameVhost($site, $oldDomain), ['on_finish' => null]);
+        }
+
+        return back()->with('success', "Renamed to {$newDomain}"
+            .($site->managesWebserverConfig() ? ' - Nginx is being updated.' : '. The site\'s own web server config was not changed.')
+            .' Remember to update APP_URL in the Environment tab if it uses the old domain.');
     }
 
     /** Imported sites: only Deploi's own view of the site changes - the vhost on the server is left alone. */
@@ -412,6 +460,30 @@ class SiteController extends Controller
 
         $site->refresh()->load('redirects');
         $site->server->runTask("Update Nginx for {$site->domain}", SiteScripts::nginxConfigFor($site, $site->activeCertificate()), ['on_finish' => null]);
+    }
+
+    /**
+     * The web directory is relative to the site folder ("/public"). People naturally paste a full
+     * path, so strip the site folder if it's there and refuse any other absolute server path.
+     */
+    protected function normalizeWebDirectory(string $value, string $sitePath): string
+    {
+        $value = '/'.trim(trim($value), '/');
+
+        foreach ([$sitePath.'/current', $sitePath] as $prefix) {
+            if ($value === $prefix || str_starts_with($value, $prefix.'/')) {
+                $value = '/'.ltrim(substr($value, strlen($prefix)), '/');
+                break;
+            }
+        }
+
+        if (preg_match('#^/(home|var|srv|opt|usr|etc|root|tmp)(/|$)#', $value) || str_contains($value, '..')) {
+            throw ValidationException::withMessages([
+                'web_directory' => "The web directory is relative to the site folder ({$sitePath}) - use e.g. \"/public\", or \"/\" for the folder itself.",
+            ]);
+        }
+
+        return rtrim($value, '/') ?: '/';
     }
 
     protected function parseAliases(string $raw): array

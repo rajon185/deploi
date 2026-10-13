@@ -357,6 +357,105 @@ class PanelTest extends TestCase
             ->assertSee('value="github" x-model="provider" class="sr-only" checked', false);
     }
 
+    public function test_web_directory_is_relative_to_the_site_folder(): void
+    {
+        $server = $this->activeServer();
+        $site = $server->sites()->create(['domain' => 'webdir.test', 'status' => 'active', 'project_type' => 'laravel', 'web_directory' => '/public', 'php_version' => '8.3']);
+        $this->actingAs($this->user);
+
+        // A full path inside the site folder is converted to the relative part
+        $this->put("/sites/{$site->id}", ['web_directory' => '/home/deploi/webdir.test/public', 'php_version' => '8.3'])->assertSessionHasNoErrors();
+        $this->assertSame('/public', $site->fresh()->web_directory);
+        $this->assertSame('/home/deploi/webdir.test/public', $site->fresh()->rootPath());
+
+        // Any other absolute server path is refused (this is what broke a real site: "/home/ploi")
+        $this->put("/sites/{$site->id}", ['web_directory' => '/home/ploi', 'php_version' => '8.3'])->assertSessionHasErrors('web_directory');
+        $this->put("/sites/{$site->id}", ['web_directory' => '/public/../..', 'php_version' => '8.3'])->assertSessionHasErrors('web_directory');
+        $this->assertSame('/public', $site->fresh()->web_directory);
+
+        $this->put("/sites/{$site->id}", ['web_directory' => '', 'php_version' => '8.3'])->assertSessionHasNoErrors();
+        $this->assertSame('/home/deploi/webdir.test', $site->fresh()->rootPath());
+    }
+
+    public function test_site_can_be_renamed_without_moving_anything(): void
+    {
+        $server = $this->activeServer();
+        $site = $server->sites()->create([
+            'domain' => 'writeandwrench.co.uk', 'aliases' => ['wrenchandwrite.co.uk', 'www.wrenchandwrite.co.uk'],
+            'status' => 'active', 'project_type' => 'laravel', 'web_directory' => '/public', 'php_version' => '8.3',
+            'ssl_status' => 'active',
+        ]);
+        $cert = $site->certificates()->create(['type' => 'letsencrypt', 'domains' => ['writeandwrench.co.uk'], 'status' => 'active', 'active' => true]);
+        $oldCertPath = $cert->path();
+        $webhook = $site->webhookUrl();
+        $this->actingAs($this->user);
+
+        $this->get("/sites/{$site->id}/settings")->assertOk()->assertSee('Site name &amp; visit link', false);
+
+        $this->put("/sites/{$site->id}/domain", ['domain' => 'WrenchAndWrite.co.uk', 'keep_old_as_alias' => 1, 'visit_url' => ''])
+            ->assertSessionHasNoErrors();
+
+        $site->refresh();
+        $this->assertSame('wrenchandwrite.co.uk', $site->domain);
+        $this->assertSame(['writeandwrench.co.uk', 'www.wrenchandwrite.co.uk'], $site->aliases);
+        $this->assertSame('/home/deploi/writeandwrench.co.uk', $site->path(), 'files stay where they are');
+        $this->assertSame($oldCertPath, $cert->fresh()->path(), 'certificate path is pinned');
+        $this->assertSame($webhook, $site->webhookUrl());
+
+        $script = $server->tasks()->latest('id')->first()->script;
+        $this->assertStringContainsString('sites-available/wrenchandwrite.co.uk', $script);
+        $this->assertStringContainsString("rm -f /etc/nginx/sites-enabled/'writeandwrench.co.uk' /etc/nginx/sites-available/'writeandwrench.co.uk'", $script);
+        $this->assertLessThan(strpos($script, 'rm -f /etc/nginx/sites-enabled/'), strpos($script, 'sites-available/wrenchandwrite.co.uk'), 'new file is written before the old one is removed');
+        $nginx = NginxConfig::render($site, $site->activeCertificate());
+        $this->assertStringContainsString('server_name wrenchandwrite.co.uk writeandwrench.co.uk www.wrenchandwrite.co.uk;', $nginx);
+        $this->assertStringContainsString("ssl_certificate {$oldCertPath}/fullchain.pem;", $nginx);
+
+        // Visit link
+        $this->assertSame('https://wrenchandwrite.co.uk', $site->visitUrl());
+        $this->put("/sites/{$site->id}/domain", ['domain' => 'wrenchandwrite.co.uk', 'visit_url' => 'https://www.wrenchandwrite.co.uk/admin'])->assertSessionHas('success', 'Visit link saved.');
+        $this->assertSame('https://www.wrenchandwrite.co.uk/admin', $site->fresh()->visitUrl());
+        $this->get("/sites/{$site->id}")->assertSee('href="https://www.wrenchandwrite.co.uk/admin"', false);
+        $this->put("/sites/{$site->id}/domain", ['domain' => 'wrenchandwrite.co.uk', 'visit_url' => 'javascript:alert(1)'])->assertSessionHasErrors('visit_url');
+
+        // Can't take a domain another site on the server already uses
+        $server->sites()->create(['domain' => 'taken.test', 'status' => 'active']);
+        $this->put("/sites/{$site->id}/domain", ['domain' => 'taken.test'])->assertSessionHasErrors('domain');
+    }
+
+    public function test_commands_run_in_the_site_directory_as_the_site_user(): void
+    {
+        $server = $this->activeServer();
+        $site = $server->sites()->create([
+            'domain' => 'cmd.test', 'status' => 'active', 'project_type' => 'laravel', 'php_version' => '8.4',
+            'web_directory' => '/public', 'zero_downtime' => true,
+        ]);
+        $this->actingAs($this->user);
+
+        $this->get("/sites/{$site->id}/commands")->assertOk()->assertSee('Run migrations')->assertSee('No commands run on this site yet.');
+
+        $this->post("/sites/{$site->id}/commands", ['command' => "php artisan migrate --force\r\nphp artisan optimize", 'timeout' => 900])
+            ->assertRedirect();
+
+        $command = $site->commands()->firstOrFail();
+        $task = $command->task;
+        $this->assertSame("php artisan migrate --force\nphp artisan optimize", $command->command);
+        $this->assertSame('deploi', $task->user);
+        $this->assertSame(900, $task->timeout);
+        $this->assertStringContainsString("cd '/home/deploi/cmd.test/current'", $task->script);
+        $this->assertStringContainsString('php() { php8.4 "$@"; }', $task->script);
+        $this->assertStringEndsWith("php artisan migrate --force\nphp artisan optimize", $task->script);
+        $this->assertBashSyntax($task->script, 'site command');
+        Queue::assertPushed(RunServerTask::class, fn ($job) => $job->task->is($task));
+
+        $this->get("/sites/{$site->id}/commands")->assertOk()->assertSee('$ php artisan migrate --force', false)->assertSee('Run again');
+
+        $this->post("/sites/{$site->id}/commands", ['command' => 'ls', 'timeout' => 99999])->assertSessionHasErrors('timeout');
+
+        $intruder = User::create(['name' => 'X', 'email' => 'x2@example.com', 'password' => 'password']);
+        $this->actingAs($intruder)->post("/sites/{$site->id}/commands", ['command' => 'id'])->assertForbidden();
+        $this->assertSame(1, $site->commands()->count());
+    }
+
     public function test_git_host_is_inferred_when_no_tile_was_submitted(): void
     {
         $server = $this->activeServer();

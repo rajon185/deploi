@@ -28,7 +28,7 @@ class Site extends Model
         'domain', 'aliases', 'project_type', 'web_directory', 'php_version', 'app_port', 'system_user',
         'source_provider_id', 'repository_provider', 'repository', 'branch', 'zero_downtime', 'keep_releases',
         'deploy_script', 'deploy_webhook_token', 'auto_deploy', 'provider_webhook_id', 'status',
-        'repository_status', 'ssl_status', 'last_deployed_at', 'imported', 'directory', 'meta',
+        'repository_status', 'ssl_status', 'last_deployed_at', 'imported', 'directory', 'meta', 'visit_url',
     ];
 
     protected function casts(): array
@@ -78,6 +78,11 @@ class Site extends Model
     public function queueWorkers(): HasMany
     {
         return $this->hasMany(QueueWorker::class);
+    }
+
+    public function commands(): HasMany
+    {
+        return $this->hasMany(SiteCommand::class);
     }
 
     public function redirects(): HasMany
@@ -161,6 +166,12 @@ class Site extends Model
         };
 
         return "git@{$host}:{$this->repository}.git";
+    }
+
+    /** Where the "Visit" button goes: a custom link if set, else the primary domain. */
+    public function visitUrl(): string
+    {
+        return $this->visit_url ?: ($this->ssl_status === 'active' ? 'https' : 'http').'://'.$this->domain;
     }
 
     public function webhookUrl(): string

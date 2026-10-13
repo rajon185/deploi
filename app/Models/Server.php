@@ -19,7 +19,8 @@ class Server extends Model
         'load_balancer' => 'Load balancer (Nginx only)',
     ];
 
-    public const PHP_VERSIONS = ['8.4', '8.3', '8.2', '8.1', '8.0', '7.4'];
+    // Stable releases available from the ondrej/php PPA. Add '8.6' once it's out of release candidate.
+    public const PHP_VERSIONS = ['8.5', '8.4', '8.3', '8.2', '8.1', '8.0', '7.4'];
 
     public const DATABASES = [
         'mysql' => 'MySQL 8',

@@ -63,6 +63,20 @@ echo "Nginx configuration updated for {$site->domain}."
 BASH;
     }
 
+    /**
+     * After changing a site's primary domain: write the vhost under the new name first (tested,
+     * rolled back on failure), and only then remove the old file - the site is never unconfigured.
+     */
+    public static function renameVhost(Site $site, string $oldDomain): string
+    {
+        $old = Bash::q($oldDomain);
+
+        return self::nginxConfigFor($site, $site->activeCertificate())
+            ."rm -f /etc/nginx/sites-enabled/{$old} /etc/nginx/sites-available/{$old}\n"
+            ."nginx -t\nsystemctl reload nginx\n"
+            ."echo 'Renamed {$oldDomain} to {$site->domain}.'\n";
+    }
+
     public static function delete(Site $site): string
     {
         $q = Bash::q($site->domain);
@@ -252,6 +266,38 @@ mv -Tf "\$DEPLOI_SITE_PATH/current-tmp" "\$DEPLOI_SITE_PATH/current"
 cd "\$DEPLOI_SITE_PATH/releases"
 ls -1t | tail -n +{$pruneFrom} | xargs -r rm -rf
 echo "Release \$RELEASE is live."
+BASH;
+    }
+
+    /**
+     * An ad-hoc command run from the site's Commands tab, in the live directory as the site user.
+     * "php" and "composer" resolve to the site's own PHP version rather than the server CLI default.
+     */
+    public static function command(Site $site, string $command): string
+    {
+        $php = 'php'.$site->phpVersion();
+        $dir = Bash::q($site->currentPath());
+        $env = collect([
+            'DEPLOI_SITE_PATH' => $site->path(),
+            'DEPLOI_DOMAIN' => $site->domain,
+            'DEPLOI_PHP' => $php,
+            'DEPLOI_COMPOSER' => $php.' /usr/local/bin/composer',
+        ])->map(fn ($v, $k) => "export {$k}=".Bash::q($v))->implode("\n");
+
+        $shims = $site->usesPhp() ? <<<BASH
+if command -v {$php} >/dev/null 2>&1; then
+    php() { {$php} "\$@"; }
+    composer() { {$php} /usr/local/bin/composer "\$@"; }
+fi
+
+BASH : '';
+
+        return <<<BASH
+{$env}
+cd {$dir}
+{$shims}
+# ---- Command ----
+{$command}
 BASH;
     }
 

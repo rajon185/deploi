@@ -6,8 +6,16 @@ use App\Models\Server;
 
 class PhpScripts
 {
+    /** Always installed - PHP can't serve sites without these. */
+    public const REQUIRED = ['fpm', 'cli', 'common'];
+
+    /**
+     * Installed when the PPA has a build for the version. Not every version has every package:
+     * e.g. PHP 8.5+ has OPcache built in (no php8.5-opcache), and brand-new releases often lack
+     * PECL extensions like redis/imagick for a few weeks.
+     */
     public const EXTENSIONS = [
-        'fpm', 'cli', 'common', 'mysql', 'pgsql', 'sqlite3', 'redis', 'gd', 'curl', 'mbstring', 'xml', 'zip',
+        'mysql', 'pgsql', 'sqlite3', 'redis', 'gd', 'curl', 'mbstring', 'xml', 'zip',
         'bcmath', 'intl', 'readline', 'soap', 'imagick', 'opcache',
     ];
 
@@ -15,9 +23,8 @@ class PhpScripts
     public static function install(Server $server, string $version): string
     {
         $user = $server->system_user;
-        $packages = collect(self::EXTENSIONS)
-            ->map(fn ($ext) => "php{$version}-{$ext}")
-            ->implode(' ');
+        $required = collect(self::REQUIRED)->map(fn ($ext) => "php{$version}-{$ext}")->implode(' ');
+        $optional = implode(' ', self::EXTENSIONS);
 
         return <<<BASH
 if ! grep -rq "ondrej/php" /etc/apt/sources.list.d/ 2>/dev/null; then
@@ -25,7 +32,15 @@ if ! grep -rq "ondrej/php" /etc/apt/sources.list.d/ 2>/dev/null; then
     \$APT update
 fi
 
-\$APT install {$packages}
+PHP_PACKAGES="{$required}"
+for EXT in {$optional}; do
+    if apt-cache show "php{$version}-\$EXT" >/dev/null 2>&1; then
+        PHP_PACKAGES="\$PHP_PACKAGES php{$version}-\$EXT"
+    else
+        echo "php{$version}-\$EXT is not available for this version - skipping"
+    fi
+done
+\$APT install \$PHP_PACKAGES
 
 # Run FPM as the deploy user so it can read/write the application files
 POOL=/etc/php/{$version}/fpm/pool.d/www.conf

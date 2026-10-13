@@ -45,7 +45,17 @@
                         </li>
                     @endforeach
                 </ul>
-                <p class="border-t border-slate-100 px-5 py-3 text-xs text-slate-500">Each site can use any installed version (Site → Settings). Packages come from the ondrej/php PPA.</p>
+                <p class="border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
+                    The CLI default only changes the plain <span class="code">php</span> command (and the default for new sites).
+                    Each site keeps its own version - used by Nginx and by <span class="code">$DEPLOI_PHP</span> / <span class="code">$DEPLOI_COMPOSER</span> in deploys - so change it under Site → Settings.
+                    Packages come from the ondrej/php PPA.
+                </p>
+                @php($sitesOnPhp = $server->sites()->get()->groupBy(fn ($s) => $s->phpVersion())->map->count())
+                @if($sitesOnPhp->isNotEmpty())
+                    <p class="border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
+                        Sites by PHP version: {{ $sitesOnPhp->sortKeysDesc()->map(fn ($n, $v) => "PHP {$v}: {$n}")->join(' · ') }}
+                    </p>
+                @endif
             </div>
         @endif
     </div>

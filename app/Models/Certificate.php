@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Certificate extends Model
 {
-    protected $fillable = ['type', 'domains', 'certificate', 'private_key', 'active', 'status', 'expires_at'];
+    protected $fillable = ['type', 'cert_name', 'domains', 'certificate', 'private_key', 'active', 'status', 'expires_at'];
 
     protected $hidden = ['certificate', 'private_key'];
 
@@ -37,6 +37,6 @@ class Certificate extends Model
 
     public function name(): string
     {
-        return $this->site->domain.'-'.$this->id;
+        return $this->cert_name ?: $this->site->domain.'-'.$this->id;
     }
 }

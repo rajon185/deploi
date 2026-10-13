@@ -19,6 +19,8 @@ class CertificateInstalled implements TaskCallback
 
         if (! $task->successful()) {
             $cert->update(['status' => 'failed']);
+            // Don't leave the site showing "installing" forever: fall back to whatever was there before.
+            $cert->site->update(['ssl_status' => $cert->site->activeCertificate() ? 'active' : null]);
 
             return;
         }

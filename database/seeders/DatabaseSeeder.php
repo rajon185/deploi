@@ -2,24 +2,16 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
     /**
-     * Seed the application's database.
+     * Deploi has nothing to seed. Create your login by visiting /register (the first account
+     * becomes the owner) or with: php artisan deploi:create-user --email=you@example.com
      */
     public function run(): void
     {
-        // User::factory(10)->create();
-
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-        ]);
+        $this->command?->warn('Nothing to seed. Create a login with: php artisan deploi:create-user --email=you@example.com');
     }
 }

@@ -1,6 +1,39 @@
 <x-layout :title="'Settings · '.$site->domain">
     <x-site-header :site="$site" active="settings" />
 
+    <form method="POST" action="{{ route('sites.domain.update', $site) }}" class="card space-y-4 p-5"
+          x-data="{ domain: @js(old('domain', $site->domain)) }">
+        @csrf @method('PUT')
+        <h2 class="font-semibold">Site name &amp; visit link</h2>
+        <div class="grid gap-4 lg:grid-cols-2">
+            <div class="space-y-2">
+                <label class="label" for="site-domain">Primary domain <span class="font-normal text-slate-400">(the site's name)</span></label>
+                <input class="input" id="site-domain" name="domain" x-model="domain" list="site-domains" required>
+                <datalist id="site-domains">
+                    @foreach($site->aliases ?? [] as $alias)<option value="{{ $alias }}"></option>@endforeach
+                </datalist>
+                <div x-show="domain.toLowerCase() !== @js($site->domain)" x-cloak class="space-y-2 rounded-md bg-slate-50 p-3 text-xs text-slate-600">
+                    <input type="hidden" name="keep_old_as_alias" value="0">
+                    <label class="flex items-center gap-2 text-sm text-slate-700">
+                        <input type="checkbox" name="keep_old_as_alias" value="1" class="rounded" checked>
+                        Keep <span class="code">{{ $site->domain }}</span> working as an alias
+                    </label>
+                    @if($site->managesWebserverConfig())
+                        <p>Deploi rewrites the Nginx file under the new name. Files stay in <span class="code">{{ $site->path() }}</span>, and SSL certificates and the deploy webhook keep working. If the new domain isn't on the certificate yet, request a new one on the SSL tab.</p>
+                    @else
+                        <p>This only renames the site in Deploi - the site's own {{ ucfirst($site->webserver()) }} config is not changed.</p>
+                    @endif
+                </div>
+            </div>
+            <div class="space-y-2">
+                <label class="label" for="visit-url">Visit link <span class="font-normal text-slate-400">(optional)</span></label>
+                <input class="input" id="visit-url" name="visit_url" value="{{ old('visit_url', $site->visit_url) }}" placeholder="{{ ($site->ssl_status === 'active' ? 'https' : 'http').'://'.$site->domain }}">
+                <p class="hint">Where the <strong>Visit ↗</strong> button goes - e.g. <span class="code">https://www.{{ $site->domain }}/admin</span>. Leave empty to use the primary domain.</p>
+            </div>
+        </div>
+        <button class="btn btn-primary">Save</button>
+    </form>
+
     <div class="grid gap-6 lg:grid-cols-2">
         @if($site->imported)
         <form method="POST" action="{{ route('sites.update', $site) }}" class="card space-y-4 p-5">
@@ -31,7 +64,11 @@
             <h2 class="font-semibold">General</h2>
             <div><label class="label">Aliases</label><input class="input" name="aliases" value="{{ old('aliases', implode(', ', $site->aliases ?? [])) }}" placeholder="www.{{ $site->domain }}"></div>
             @if($site->project_type !== 'nodejs')
-                <div><label class="label">Web directory</label><input class="input font-mono" name="web_directory" value="{{ old('web_directory', $site->web_directory) }}"></div>
+                <div>
+                    <label class="label">Web directory</label>
+                    <input class="input font-mono" name="web_directory" value="{{ old('web_directory', $site->web_directory) }}" placeholder="/public">
+                    <p class="hint">Relative to <span class="code">{{ $site->currentPath() }}</span> - e.g. <span class="code">/public</span> for Laravel, <span class="code">/</span> for the folder itself. Nginx root is currently <span class="code">{{ $site->rootPath() }}</span>.</p>
+                </div>
             @else
                 <div><label class="label">App port</label><input class="input" type="number" name="app_port" value="{{ old('app_port', $site->app_port) }}"></div>
             @endif
@@ -41,6 +78,10 @@
                     <select class="input" name="php_version">
                         @foreach($server->installed_php_versions ?? [] as $v)<option value="{{ $v }}" @selected($v === $site->phpVersion())>PHP {{ $v }}</option>@endforeach
                     </select>
+                    @php($notInstalled = array_diff(\App\Models\Server::PHP_VERSIONS, $server->installed_php_versions ?? []))
+                    @if($notInstalled)
+                        <p class="hint">Only versions installed on {{ $server->name }} are listed. Need PHP {{ implode(' / ', array_slice($notInstalled, 0, 2)) }}? <a href="{{ route('servers.services', $server) }}" class="text-indigo-600 hover:underline">Install it under PHP &amp; services</a> first.</p>
+                    @endif
                     <p class="hint">Remember to update your deploy script if it hard-codes a PHP binary.</p>
                 </div>
             @endif
