@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class DatabaseUser extends Model
 {
-    protected $fillable = ['username', 'password', 'host', 'status'];
+    protected $fillable = ['username', 'engine', 'password', 'host', 'status'];
 
     protected $hidden = ['password'];
 

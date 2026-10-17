@@ -101,14 +101,18 @@ class DiscoveryController extends Controller
 
     public function importDatabases(Request $request, Server $server)
     {
-        $discovered = collect($server->discovery()['databases'] ?? [])->pluck('name')->all();
+        $found = collect($server->discovery()['databases'] ?? []);
+        $discovered = $found->pluck('name')->all();
         $data = $request->validate(['databases' => ['required', 'array', 'min:1'], 'databases.*' => ['string']]);
 
         $imported = 0;
 
         foreach (array_intersect($data['databases'], $discovered) as $name) {
             if (! $server->databases()->where('name', $name)->exists()) {
-                $server->databases()->create(['name' => $name, 'status' => 'active']);
+                // The scan reports MySQL and MariaDB both as "mysql"; the server's engine list tells them apart.
+                $engine = $found->firstWhere('name', $name)['engine'] ?? $server->database_type;
+                $engine = $engine === 'mysql' && $server->hasDatabaseEngine('mariadb') ? 'mariadb' : $engine;
+                $server->databases()->create(['name' => $name, 'engine' => $engine, 'status' => 'active']);
                 $imported++;
             }
         }
@@ -128,6 +132,7 @@ class DiscoveryController extends Controller
             'php_version' => $cli ?: (collect($fpm)->sort()->last() ?: null),
             'installed_php_versions' => array_values(array_unique(array_filter([...$fpm, ...($fpm ? [] : [$cli])]))),
             'database_type' => $d['database_type'],
+            'database_engines' => $d['database_engines'] ?? array_filter([$d['database_type']]),
             'webserver' => isset($software['nginx']) ? 'nginx' : (isset($software['apache']) ? 'apache' : 'none'),
             'install_redis' => isset($software['redis']),
             'install_node' => isset($software['node']),

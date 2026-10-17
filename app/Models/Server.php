@@ -31,7 +31,7 @@ class Server extends Model
     protected $fillable = [
         'name', 'type', 'provider', 'server_provider_id', 'provider_server_id', 'ip_address', 'private_ip_address',
         'ssh_port', 'ssh_user', 'system_user', 'region', 'size', 'os', 'php_version', 'installed_php_versions',
-        'database_type', 'webserver', 'install_redis', 'install_node', 'status', 'provision_step',
+        'database_type', 'database_engines', 'webserver', 'install_redis', 'install_node', 'status', 'provision_step',
         'provision_progress', 'private_key', 'public_key', 'sudo_password', 'database_password',
         'deploy_public_key', 'provider_ssh_key_id', 'imported', 'provisioned_at', 'last_seen_at', 'meta',
     ];
@@ -45,6 +45,7 @@ class Server extends Model
             'sudo_password' => 'encrypted',
             'database_password' => 'encrypted',
             'installed_php_versions' => 'array',
+            'database_engines' => 'array',
             'install_redis' => 'boolean',
             'install_node' => 'boolean',
             'imported' => 'boolean',
@@ -143,7 +144,36 @@ class Server extends Model
 
     public function hasDatabase(): bool
     {
-        return $this->database_type !== null && in_array($this->type, ['server', 'database'], true);
+        return $this->supportsDatabases() && $this->databaseEngines() !== [];
+    }
+
+    /** Server types that may run database engines (whether or not one is installed yet). */
+    public function supportsDatabases(): bool
+    {
+        return in_array($this->type, ['server', 'database'], true);
+    }
+
+    /** Installed database engines; database_type is the primary one (provisioned, used in site .env). */
+    public function databaseEngines(): array
+    {
+        return $this->database_engines ?? ($this->database_type ? [$this->database_type] : []);
+    }
+
+    public function hasDatabaseEngine(string $engine): bool
+    {
+        return in_array($engine, $this->databaseEngines(), true);
+    }
+
+    /** MySQL and MariaDB share packages, the port and the data directory, so only one of them can be installed. */
+    public function conflictingDatabaseEngine(string $engine): ?string
+    {
+        $family = ['mysql', 'mariadb'];
+
+        if (! in_array($engine, $family, true)) {
+            return null;
+        }
+
+        return collect($this->databaseEngines())->first(fn ($e) => $e !== $engine && in_array($e, $family, true));
     }
 
     public function homePath(?string $user = null): string

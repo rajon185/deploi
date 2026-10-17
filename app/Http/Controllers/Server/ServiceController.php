@@ -84,8 +84,10 @@ class ServiceController extends Controller
             $services["php{$version}-fpm"] = "PHP {$version} FPM";
         }
 
-        if ($server->hasDatabase()) {
-            $services[$server->database_type] = Server::DATABASES[$server->database_type];
+        if ($server->supportsDatabases()) {
+            foreach ($server->databaseEngines() as $engine) {
+                $services[$engine] = Server::DATABASES[$engine] ?? $engine;
+            }
         }
 
         if ($server->install_redis) {

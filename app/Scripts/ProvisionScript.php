@@ -145,7 +145,7 @@ BASH;
 
         if ($s->hasDatabase()) {
             $parts[] = Bash::progress(70, 'Installing '.(Server::DATABASES[$s->database_type] ?? $s->database_type));
-            $parts[] = $this->database();
+            $parts[] = ServerScripts::databaseEngine($s, $s->database_type);
         }
 
         if ($s->install_redis && $s->type !== 'load_balancer') {
@@ -214,46 +214,5 @@ systemctl enable nginx
 systemctl restart nginx
 
 BASH;
-    }
-
-    protected function database(): string
-    {
-        $s = $this->server;
-        $user = $s->system_user;
-        $password = $s->database_password;
-
-        return match ($s->database_type) {
-            'postgresql' => <<<BASH
-\$APT install postgresql postgresql-contrib
-PG_DIR=\$(ls -d /etc/postgresql/*/main | tail -n1)
-sed -i "s/^#\?listen_addresses.*/listen_addresses = '*'/" \$PG_DIR/postgresql.conf
-grep -q "deploi-remote" \$PG_DIR/pg_hba.conf || echo "host all all 0.0.0.0/0 scram-sha-256 # deploi-remote" >> \$PG_DIR/pg_hba.conf
-systemctl enable postgresql
-systemctl restart postgresql
-
-BASH.Bash::pipeSql(
-                "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{$user}') THEN CREATE ROLE {$user} LOGIN SUPERUSER PASSWORD '{$password}'; END IF; END \$\$;",
-                'sudo -u postgres psql -v ON_ERROR_STOP=1'
-            ),
-            default => ($s->database_type === 'mariadb' ? "\$APT install mariadb-server\n" : "\$APT install mysql-server\n")
-                .<<<'BASH'
-CNF=$( [ -d /etc/mysql/mysql.conf.d ] && echo /etc/mysql/mysql.conf.d/mysqld.cnf || echo /etc/mysql/mariadb.conf.d/50-server.cnf )
-sed -i "s/^bind-address.*/bind-address = 0.0.0.0/" $CNF
-sed -i "s/^mysqlx-bind-address.*/mysqlx-bind-address = 127.0.0.1/" $CNF || true
-SERVICE=$( [ -f /lib/systemd/system/mariadb.service ] && echo mariadb || echo mysql )
-systemctl enable $SERVICE
-systemctl restart $SERVICE
-
-BASH
-                // root keeps socket auth (so Deploi can manage databases as root); a password user is created for apps/GUI clients.
-                .Bash::pipeSql(
-                    "CREATE USER IF NOT EXISTS '{$user}'@'localhost' IDENTIFIED BY '{$password}';\n"
-                    ."CREATE USER IF NOT EXISTS '{$user}'@'%' IDENTIFIED BY '{$password}';\n"
-                    ."GRANT ALL PRIVILEGES ON *.* TO '{$user}'@'localhost' WITH GRANT OPTION;\n"
-                    ."GRANT ALL PRIVILEGES ON *.* TO '{$user}'@'%' WITH GRANT OPTION;\n"
-                    ."FLUSH PRIVILEGES;\n",
-                    'mysql'
-                ),
-        };
     }
 }

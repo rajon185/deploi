@@ -14,6 +14,7 @@ use App\Scripts\ProvisionScript;
 use App\Scripts\ServerScripts;
 use App\Scripts\SiteScripts;
 use App\Services\Providers\ProviderManager;
+use App\Tasks\Callbacks\DatabaseCreated;
 use App\Tasks\Callbacks\DeploymentFinished;
 use App\Tasks\Callbacks\ProvisionFinished;
 use App\Tasks\Callbacks\RepositoryInstalled;
@@ -244,6 +245,61 @@ class PanelTest extends TestCase
         Queue::assertPushed(RunServerTask::class, 8);
 
         $this->get("/servers/{$server->id}/databases")->assertOk()->assertSee('shop');
+    }
+
+    public function test_creating_a_database_on_a_new_engine_installs_that_engine(): void
+    {
+        $server = $this->activeServer();
+        $this->actingAs($this->user);
+
+        $this->get("/servers/{$server->id}/databases")->assertOk()->assertSee('PostgreSQL (will be installed)');
+
+        $this->post("/servers/{$server->id}/databases", ['engine' => 'postgresql', 'name' => 'analytics'])->assertSessionHasNoErrors();
+        $task = $this->latestTask();
+        $this->assertBashSyntax($task->script, 'install postgresql + create db');
+        $this->assertStringContainsString('install postgresql postgresql-contrib', $task->script);
+        $this->assertStringContainsString('sudo -u postgres createdb analytics', $task->script);
+        $this->assertSame('postgresql', $server->databases()->firstWhere('name', 'analytics')->engine);
+
+        $task->update(['status' => 'finished', 'exit_code' => 0]);
+        (new DatabaseCreated)->handle($task->fresh());
+        $server->refresh();
+        $this->assertSame(['mysql', 'postgresql'], $server->databaseEngines());
+        $this->assertSame('mysql', $server->database_type);
+        $this->assertSame('active', $server->databases()->firstWhere('name', 'analytics')->status);
+
+        // An installed engine is not reinstalled; the default engine stays the server's primary one.
+        $this->post("/servers/{$server->id}/databases", ['engine' => 'postgresql', 'name' => 'reports'])->assertSessionHasNoErrors();
+        $this->assertStringNotContainsString('apt-get', $this->latestTask()->script);
+        $this->post("/servers/{$server->id}/databases", ['name' => 'shop'])->assertSessionHasNoErrors();
+        $this->assertStringContainsString('| mysql', $this->latestTask()->script);
+
+        // MariaDB can't sit next to MySQL.
+        $this->post("/servers/{$server->id}/databases", ['engine' => 'mariadb', 'name' => 'legacy'])->assertSessionHasErrors('engine');
+
+        // Users belong to one engine and are only granted databases on it.
+        $ids = $server->databases()->pluck('id', 'name');
+        $this->post("/servers/{$server->id}/database-users", ['engine' => 'postgresql', 'username' => 'bi', 'databases' => [$ids['analytics'], $ids['shop']]])->assertSessionHasNoErrors();
+        $user = $server->databaseUsers()->firstWhere('username', 'bi');
+        $this->assertSame(['analytics'], $user->databases->pluck('name')->all());
+        $this->assertStringContainsString('psql', $this->latestTask()->script);
+        $this->assertBashSyntax($this->latestTask()->script, 'pg user');
+    }
+
+    public function test_database_server_without_an_engine_can_get_one(): void
+    {
+        $server = $this->activeServer(['type' => 'database', 'database_type' => null, 'database_password' => null]);
+        $this->actingAs($this->user);
+
+        $this->get("/servers/{$server->id}/databases")->assertOk()->assertSee('Create a database first');
+        $this->post("/servers/{$server->id}/databases", ['engine' => 'mariadb', 'name' => 'app'])->assertSessionHasNoErrors();
+        $this->assertStringContainsString('install mariadb-server', $this->latestTask()->script);
+        $this->assertNotEmpty($server->fresh()->database_password);
+
+        $task = $this->latestTask();
+        $task->update(['status' => 'finished', 'exit_code' => 0]);
+        (new DatabaseCreated)->handle($task->fresh());
+        $this->assertSame('mariadb', $server->fresh()->database_type);
     }
 
     public function test_site_lifecycle_create_install_deploy(): void

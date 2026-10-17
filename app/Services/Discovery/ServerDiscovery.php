@@ -454,6 +454,10 @@ BASH;
             ]),
             'ufw' => $info['ufw'] ?? 'missing',
             'database_type' => $databaseType,
+            'database_engines' => array_values(array_filter([
+                $mysql ? (stripos($mysql, 'mariadb') !== false ? 'mariadb' : 'mysql') : null,
+                isset($info['postgresql']) ? 'postgresql' : null,
+            ])),
             'users' => $parsed['users'],
             'keys' => $parsed['keys'],
             'sites' => $sites,

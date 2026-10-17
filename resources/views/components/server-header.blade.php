@@ -2,7 +2,7 @@
 @php
     $tabs = ['overview' => ['Overview', route('servers.show', $server)]];
     if ($server->isActive() || $server->status === 'disconnected') {
-        if ($server->hasDatabase()) $tabs['databases'] = ['Databases', route('servers.databases', $server)];
+        if ($server->supportsDatabases()) $tabs['databases'] = ['Databases', route('servers.databases', $server)];
         $tabs['cronjobs'] = ['Cron jobs', route('servers.cronjobs', $server)];
         $tabs['daemons'] = ['Daemons', route('servers.daemons', $server)];
         $tabs['firewall'] = ['Firewall', route('servers.firewall', $server)];
@@ -24,7 +24,7 @@
                 <span>{{ $server->ip_address ?? 'No IP yet' }}</span>
                 <span>{{ \App\Services\Providers\ProviderManager::name($server->provider) }}{{ $server->region ? ' · '.$server->region : '' }}</span>
                 @if($server->php_version)<span>PHP {{ $server->php_version }}</span>@endif
-                @if($server->database_type)<span>{{ \App\Models\Server::DATABASES[$server->database_type] }}</span>@endif
+                @foreach($server->databaseEngines() as $engine)<span>{{ \App\Models\Server::DATABASES[$engine] ?? $engine }}</span>@endforeach
             </p>
         </div>
         {{ $slot }}

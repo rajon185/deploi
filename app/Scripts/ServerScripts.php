@@ -19,52 +19,103 @@ class ServerScripts
 
     // ---------------------------------------------------------------- Databases
 
-    protected static function sql(Server $server, string $sql): string
+    protected static function sql(string $engine, string $sql): string
     {
-        return $server->database_type === 'postgresql'
+        return $engine === 'postgresql'
             ? Bash::pipeSql($sql, 'sudo -u postgres psql -v ON_ERROR_STOP=1')
             : Bash::pipeSql($sql, 'mysql');
     }
 
+    /**
+     * Install a database engine and create the server's system user in it (superuser, password =
+     * database_password). Expects $APT to be defined; used by provisioning and installDatabaseEngine().
+     */
+    public static function databaseEngine(Server $server, string $engine): string
+    {
+        $user = $server->system_user;
+        $password = $server->database_password;
+
+        return match ($engine) {
+            'postgresql' => <<<BASH
+\$APT install postgresql postgresql-contrib
+PG_DIR=\$(ls -d /etc/postgresql/*/main | tail -n1)
+sed -i "s/^#\?listen_addresses.*/listen_addresses = '*'/" \$PG_DIR/postgresql.conf
+grep -q "deploi-remote" \$PG_DIR/pg_hba.conf || echo "host all all 0.0.0.0/0 scram-sha-256 # deploi-remote" >> \$PG_DIR/pg_hba.conf
+systemctl enable postgresql
+systemctl restart postgresql
+
+BASH.Bash::pipeSql(
+                "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{$user}') THEN CREATE ROLE {$user} LOGIN SUPERUSER PASSWORD '{$password}'; END IF; END \$\$;",
+                'sudo -u postgres psql -v ON_ERROR_STOP=1'
+            ),
+            default => ($engine === 'mariadb' ? "\$APT install mariadb-server\n" : "\$APT install mysql-server\n")
+                .<<<'BASH'
+CNF=$( [ -d /etc/mysql/mysql.conf.d ] && echo /etc/mysql/mysql.conf.d/mysqld.cnf || echo /etc/mysql/mariadb.conf.d/50-server.cnf )
+sed -i "s/^bind-address.*/bind-address = 0.0.0.0/" $CNF
+sed -i "s/^mysqlx-bind-address.*/mysqlx-bind-address = 127.0.0.1/" $CNF || true
+SERVICE=$( [ -f /lib/systemd/system/mariadb.service ] && echo mariadb || echo mysql )
+systemctl enable $SERVICE
+systemctl restart $SERVICE
+
+BASH
+                // root keeps socket auth (so Deploi can manage databases as root); a password user is created for apps/GUI clients.
+                .Bash::pipeSql(
+                    "CREATE USER IF NOT EXISTS '{$user}'@'localhost' IDENTIFIED BY '{$password}';\n"
+                    ."CREATE USER IF NOT EXISTS '{$user}'@'%' IDENTIFIED BY '{$password}';\n"
+                    ."GRANT ALL PRIVILEGES ON *.* TO '{$user}'@'localhost' WITH GRANT OPTION;\n"
+                    ."GRANT ALL PRIVILEGES ON *.* TO '{$user}'@'%' WITH GRANT OPTION;\n"
+                    ."FLUSH PRIVILEGES;\n",
+                    'mysql'
+                ),
+        };
+    }
+
+    /** Standalone databaseEngine() for adding an engine to an already-provisioned server. */
+    public static function installDatabaseEngine(Server $server, string $engine): string
+    {
+        return "export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a\n"
+            ."APT=\"apt-get -y -o DPkg::Lock::Timeout=600 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold\"\n"
+            ."\$APT update\n"
+            .self::databaseEngine($server, $engine)
+            ."echo '".(Server::DATABASES[$engine] ?? $engine)." installed.'\n";
+    }
+
     public static function createDatabase(Database $db): string
     {
-        $server = $db->server;
-
-        if ($server->database_type === 'postgresql') {
+        if ($db->engine === 'postgresql') {
             return "if ! sudo -u postgres psql -tAc \"SELECT 1 FROM pg_database WHERE datname='{$db->name}'\" | grep -q 1; then\n"
                 ."    sudo -u postgres createdb {$db->name}\nfi\necho 'Database {$db->name} ready.'\n";
         }
 
-        return self::sql($server, "CREATE DATABASE IF NOT EXISTS `{$db->name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
+        return self::sql($db->engine, "CREATE DATABASE IF NOT EXISTS `{$db->name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
             ."echo 'Database {$db->name} ready.'\n";
     }
 
     public static function dropDatabase(Database $db): string
     {
-        $server = $db->server;
-
-        return $server->database_type === 'postgresql'
+        return $db->engine === 'postgresql'
             ? "sudo -u postgres dropdb --if-exists {$db->name}\n"
-            : self::sql($server, "DROP DATABASE IF EXISTS `{$db->name}`;");
+            : self::sql($db->engine, "DROP DATABASE IF EXISTS `{$db->name}`;");
     }
 
-    /** Create or update a user and sync its grants to exactly the given databases. */
+    /** Create or update a user and sync its grants to exactly the given databases (all on the user's engine). */
     public static function syncDatabaseUser(DatabaseUser $user): string
     {
         $server = $user->server;
+        $engine = $user->engine;
         $u = $user->username;
         $p = $user->password;
         $dbs = $user->databases->pluck('name');
 
-        if ($server->database_type === 'postgresql') {
+        if ($engine === 'postgresql') {
             $sql = "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{$u}') THEN CREATE ROLE \"{$u}\" LOGIN PASSWORD '{$p}'; ELSE ALTER ROLE \"{$u}\" WITH LOGIN PASSWORD '{$p}'; END IF; END \$\$;\n";
-            $script = self::sql($server, $sql);
+            $script = self::sql($engine, $sql);
 
-            foreach ($server->databases()->pluck('name') as $name) {
+            foreach ($server->databases()->where('engine', 'postgresql')->pluck('name') as $name) {
                 $stmt = $dbs->contains($name)
                     ? "GRANT ALL PRIVILEGES ON DATABASE \"{$name}\" TO \"{$u}\";"
                     : "REVOKE ALL PRIVILEGES ON DATABASE \"{$name}\" FROM \"{$u}\";";
-                $script .= self::sql($server, $stmt);
+                $script .= self::sql($engine, $stmt);
 
                 if ($dbs->contains($name)) {
                     $script .= Bash::pipeSql("GRANT ALL ON SCHEMA public TO \"{$u}\";", "sudo -u postgres psql -v ON_ERROR_STOP=1 -d {$name}");
@@ -83,26 +134,26 @@ class ServerScripts
             $sql .= "GRANT ALL PRIVILEGES ON `{$name}`.* TO '{$u}'@'{$host}';\n";
         }
 
-        return self::sql($server, $sql."FLUSH PRIVILEGES;\n")."echo 'User {$u} synced.'\n";
+        return self::sql($engine, $sql."FLUSH PRIVILEGES;\n")."echo 'User {$u} synced.'\n";
     }
 
     public static function dropDatabaseUser(DatabaseUser $user): string
     {
         $server = $user->server;
 
-        if ($server->database_type === 'postgresql') {
+        if ($user->engine === 'postgresql') {
             $script = '';
-            foreach ($server->databases()->pluck('name') as $name) {
+            foreach ($server->databases()->where('engine', 'postgresql')->pluck('name') as $name) {
                 $script .= Bash::pipeSql("REASSIGN OWNED BY \"{$user->username}\" TO postgres; DROP OWNED BY \"{$user->username}\";", "sudo -u postgres psql -d {$name}")
                     ." || true\n";
             }
 
-            return $script.self::sql($server, "DROP ROLE IF EXISTS \"{$user->username}\";");
+            return $script.self::sql('postgresql', "DROP ROLE IF EXISTS \"{$user->username}\";");
         }
 
         $host = $user->host ?: '%';
 
-        return self::sql($server, "DROP USER IF EXISTS '{$user->username}'@'{$host}';\nFLUSH PRIVILEGES;");
+        return self::sql($user->engine, "DROP USER IF EXISTS '{$user->username}'@'{$host}';\nFLUSH PRIVILEGES;");
     }
 
     // ---------------------------------------------------------------- Cron
@@ -301,7 +352,7 @@ CONF;
         $server = $db->server;
         $c = $backup->disk->credentials;
 
-        $dump = $server->database_type === 'postgresql'
+        $dump = $db->engine === 'postgresql'
             ? "sudo -u postgres pg_dump {$db->name}"
             : "mysqldump --single-transaction --quick --routines --triggers {$db->name}";
 
