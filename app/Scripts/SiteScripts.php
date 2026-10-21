@@ -77,6 +77,47 @@ BASH;
             ."echo 'Renamed {$oldDomain} to {$site->domain}.'\n";
     }
 
+    /**
+     * Imported sites: point the existing vhost at another PHP-FPM version by swapping only the
+     * phpX.Y-fpm.sock reference - nothing else in the file changes. Tested, rolled back on failure.
+     */
+    public static function switchPhpFpm(Site $site): string
+    {
+        $conf = Bash::q($site->meta['config_path']);
+        $version = $site->phpVersion();
+        $socket = "php{$version}-fpm.sock";
+        [$test, $reload] = $site->webserver() === 'apache'
+            ? ['apachectl configtest', 'systemctl reload apache2']
+            : ['nginx -t', 'systemctl reload nginx'];
+
+        return <<<BASH
+CONF={$conf}
+test -f "\$CONF" || { echo "Config file \$CONF not found."; exit 1; }
+OLD_SOCK=\$(grep -oE '[^[:space:];"|]*php[0-9]+\.[0-9]+-fpm\.sock' "\$CONF" | head -n1)
+if [ -z "\$OLD_SOCK" ]; then
+    echo "No versioned PHP-FPM socket (phpX.Y-fpm.sock) found in \$CONF - change its PHP handler by hand."
+    exit 1
+fi
+NEW_SOCK=\$(echo "\$OLD_SOCK" | sed -E 's#php[0-9]+\.[0-9]+-fpm\.sock\$#{$socket}#')
+if [ "\$OLD_SOCK" = "\$NEW_SOCK" ] && [ "\$(grep -cE 'php[0-9]+\.[0-9]+-fpm\.sock' "\$CONF")" = "\$(grep -c '{$socket}' "\$CONF")" ]; then
+    echo "\$CONF already uses PHP {$version}."
+    exit 0
+fi
+test -S "\$NEW_SOCK" || { echo "\$NEW_SOCK does not exist - is php{$version}-fpm installed and running?"; exit 1; }
+
+cp "\$CONF" /tmp/deploi-vhost-backup
+sed -i --follow-symlinks -E 's#php[0-9]+\.[0-9]+-fpm\.sock#{$socket}#g' "\$CONF"
+if ! {$test}; then
+    echo "Config test failed - rolling back."
+    cp /tmp/deploi-vhost-backup "\$CONF"
+    exit 1
+fi
+{$reload}
+echo "{$site->domain} now runs on PHP {$version} (\$NEW_SOCK)."
+
+BASH;
+    }
+
     public static function delete(Site $site): string
     {
         $q = Bash::q($site->domain);

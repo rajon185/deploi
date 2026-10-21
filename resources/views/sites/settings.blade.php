@@ -45,7 +45,7 @@
                 <dt class="text-slate-500">Web root</dt><dd class="col-span-2 font-mono break-all">{{ $site->meta['root'] ?? '—' }}</dd>
                 <dt class="text-slate-500">Domains</dt><dd class="col-span-2">{{ implode(', ', $site->allDomains()) }}</dd>
             </dl>
-            <p class="text-xs text-slate-500">Deploi leaves this site's {{ ucfirst($site->webserver()) }} config alone. Change domains, redirects or PHP handling in that file directly{{ ! empty($site->meta['shared_config']) ? ' (note: it also contains other sites)' : '' }}.</p>
+            <p class="text-xs text-slate-500">Deploi leaves this site's {{ ucfirst($site->webserver()) }} config alone{{ empty($site->meta['shared_config']) ? ', except for switching its PHP-FPM socket when you change the PHP version' : '' }}. Change domains, redirects{{ ! empty($site->meta['shared_config']) ? ' or PHP handling' : '' }} in that file directly{{ ! empty($site->meta['shared_config']) ? ' (note: it also contains other sites)' : '' }}.</p>
             <div><label class="label">Project directory</label><input class="input font-mono" name="directory" value="{{ old('directory', $site->path()) }}" required><p class="hint">Where deploy scripts, <span class="code">.env</span> and logs are read from.</p></div>
             <div class="grid grid-cols-2 gap-3">
                 <div><label class="label">Run commands as</label><input class="input font-mono" name="system_user" value="{{ old('system_user', $site->system_user) }}" required></div>
@@ -53,9 +53,12 @@
                     <label class="label">Project type</label>
                     <select class="input" name="project_type">@foreach(\App\Models\Site::PROJECT_TYPES as $k => $v)<option value="{{ $k }}" @selected($site->project_type === $k)>{{ $v }}</option>@endforeach</select>
                 </div>
-                <div><label class="label">PHP version</label><input class="input" name="php_version" value="{{ old('php_version', $site->php_version) }}" placeholder="8.3"><p class="hint">Used for <span class="code">$DEPLOI_PHP</span>.</p></div>
+                <div><label class="label">PHP version</label><input class="input" name="php_version" value="{{ old('php_version', $site->php_version) }}" placeholder="8.3"><p class="hint">Used for <span class="code">$DEPLOI_PHP</span>{{ $site->usesPhp() && empty($site->meta['shared_config']) ? ' and the site\'s PHP-FPM socket' : '' }}.</p></div>
                 <div><label class="label">Git branch</label><input class="input font-mono" name="branch" value="{{ old('branch', $site->branch) }}"></div>
             </div>
+            @if($site->usesPhp() && empty($site->meta['shared_config']))
+                <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="apply_php_fpm" value="1"> Re-apply the PHP version to the {{ ucfirst($site->webserver()) }} config, even if it hasn't changed</label>
+            @endif
             <button class="btn btn-primary">Save</button>
         </form>
         @else
