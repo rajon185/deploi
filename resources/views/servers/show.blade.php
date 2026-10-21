@@ -195,7 +195,7 @@
                         <label class="label" for="php_version">PHP version</label>
                         <select class="input" id="php_version" name="php_version">
                             @foreach($server->installed_php_versions ?? [] as $v)
-                                <option value="{{ $v }}" @selected($v === $server->php_version)>PHP {{ $v }}</option>
+                                <option value="{{ $v }}" @selected($v === $server->php_version)>PHP {{ $server->phpRelease($v) }}</option>
                             @endforeach
                         </select>
                     </div>

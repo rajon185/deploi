@@ -23,7 +23,7 @@
             <p class="mt-1 flex flex-wrap gap-x-4 text-sm text-slate-500">
                 <span>{{ $server->ip_address ?? 'No IP yet' }}</span>
                 <span>{{ \App\Services\Providers\ProviderManager::name($server->provider) }}{{ $server->region ? ' · '.$server->region : '' }}</span>
-                @if($server->php_version)<span>PHP {{ $server->php_version }}</span>@endif
+                @if($server->php_version)<span>PHP {{ $server->phpRelease($server->php_version) }}</span>@endif
                 @foreach($server->databaseEngines() as $engine)<span>{{ \App\Models\Server::DATABASES[$engine] ?? $engine }}</span>@endforeach
             </p>
         </div>

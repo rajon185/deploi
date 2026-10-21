@@ -76,7 +76,7 @@
                 <div>
                     <label class="label">PHP version</label>
                     <select class="input" name="php_version">
-                        @foreach($server->installed_php_versions ?? [] as $v)<option value="{{ $v }}" @selected($v === $site->phpVersion())>PHP {{ $v }}</option>@endforeach
+                        @foreach($server->installed_php_versions ?? [] as $v)<option value="{{ $v }}" @selected($v === $site->phpVersion())>PHP {{ $server->phpRelease($v) }}</option>@endforeach
                     </select>
                     @php($notInstalled = array_diff(\App\Models\Server::PHP_VERSIONS, $server->installed_php_versions ?? []))
                     @if($notInstalled)

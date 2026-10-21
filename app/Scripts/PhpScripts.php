@@ -70,6 +70,17 @@ BASH;
         return "echo \"##DEPLOI_PHP_VERSION:{$version}:\$(php{$version} -r 'echo PHP_VERSION;')##\"\n";
     }
 
+    /** Report the exact release of every PHP binary on the server (run by deploi:check-servers). */
+    public static function detectVersions(): string
+    {
+        return <<<'BASH'
+for BIN in /usr/bin/php[0-9]*.[0-9]*; do
+    [ -x "$BIN" ] && echo "##DEPLOI_PHP_VERSION:${BIN#/usr/bin/php}:$("$BIN" -r 'echo PHP_VERSION;' 2>/dev/null)##"
+done
+true
+BASH;
+    }
+
     /** Upgrade an installed PHP version to the newest patch release (e.g. 8.4.1 -> 8.4.2) from the PPA. */
     public static function update(string $version): string
     {

@@ -30,7 +30,7 @@
                         <li class="flex items-center justify-between px-5 py-3">
                             <div class="flex items-center gap-2">
                                 <span class="font-medium">PHP {{ $version }}</span>
-                                @if($installed && ($patch = $server->meta['php_patch_versions'][$version] ?? null))<span class="font-mono text-xs text-slate-500">{{ $patch }}</span>@endif
+                                @if($installed && $server->phpRelease($version) !== $version)<span class="font-mono text-xs text-slate-500">{{ $server->phpRelease($version) }}</span>@endif
                                 @if($server->php_version === $version)<x-badge status="active">CLI default</x-badge>@endif
                             </div>
                             <div class="flex gap-2">

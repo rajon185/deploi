@@ -142,6 +142,12 @@ class Server extends Model
         return in_array($this->type, ['server', 'worker'], true);
     }
 
+    /** "8.4" -> "8.4.2" once the exact release is known (from install/update tasks and the 5-minute server check). */
+    public function phpRelease(string $version): string
+    {
+        return $this->meta['php_patch_versions'][$version] ?? $version;
+    }
+
     public function hasDatabase(): bool
     {
         return $this->supportsDatabases() && $this->databaseEngines() !== [];

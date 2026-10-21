@@ -10,6 +10,7 @@ use App\Models\ServerTask;
 use App\Models\Site;
 use App\Models\User;
 use App\Scripts\NginxConfig;
+use App\Scripts\PhpScripts;
 use App\Scripts\ProvisionScript;
 use App\Scripts\ServerScripts;
 use App\Scripts\SiteScripts;
@@ -321,6 +322,15 @@ class PanelTest extends TestCase
         (new PhpUpdated)->handle($task->fresh());
         $this->assertSame('8.4.2', $server->fresh()->meta['php_patch_versions']['8.4']);
         $this->get("/servers/{$server->id}/services")->assertSee('8.4.2');
+
+        // The 5-minute server check reports every PHP binary, e.g. after an unattended apt upgrade.
+        $this->assertBashSyntax(PhpScripts::detectVersions(), 'php detect');
+        PhpUpdated::record($server->fresh(), "##DEPLOI_PHP_VERSION:8.3:8.3.14##\n##DEPLOI_PHP_VERSION:8.4:8.4.3##\n##DEPLOI_PHP_VERSION:7.4:##\n");
+        $server->refresh();
+        $this->assertSame(['8.4' => '8.4.3', '8.3' => '8.3.14'], $server->meta['php_patch_versions']);
+        $this->assertSame('8.3.14', $server->phpRelease('8.3'));
+        $this->assertSame('8.1', $server->phpRelease('8.1'));
+        $this->get("/servers/{$server->id}/services")->assertSee('PHP 8.3.14')->assertSee('8.4.3');
 
         // Only installed versions can be updated.
         $this->post("/servers/{$server->id}/php/8.1/update")->assertNotFound();
