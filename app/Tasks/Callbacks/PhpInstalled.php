@@ -22,5 +22,7 @@ class PhpInstalled implements TaskCallback
             : $versions->push($version)->unique();
 
         $server->update(['installed_php_versions' => $versions->sort()->values()->all()]);
+
+        (new PhpUpdated)->handle($task);
     }
 }

@@ -16,6 +16,7 @@ use App\Scripts\SiteScripts;
 use App\Services\Providers\ProviderManager;
 use App\Tasks\Callbacks\DatabaseCreated;
 use App\Tasks\Callbacks\DeploymentFinished;
+use App\Tasks\Callbacks\PhpUpdated;
 use App\Tasks\Callbacks\ProvisionFinished;
 use App\Tasks\Callbacks\RepositoryInstalled;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -300,6 +301,29 @@ class PanelTest extends TestCase
         $task->update(['status' => 'finished', 'exit_code' => 0]);
         (new DatabaseCreated)->handle($task->fresh());
         $this->assertSame('mariadb', $server->fresh()->database_type);
+    }
+
+    public function test_installed_php_version_can_be_updated_to_the_latest_patch_release(): void
+    {
+        $server = $this->activeServer(['installed_php_versions' => ['8.3', '8.4']]);
+        $this->actingAs($this->user);
+
+        $this->get("/servers/{$server->id}/services")->assertOk()->assertSee(route('servers.php.update', [$server, '8.4']));
+
+        $this->post("/servers/{$server->id}/php/8.4/update")->assertSessionHas('success');
+        $task = $this->latestTask();
+        $this->assertSame('Update PHP 8.4', $task->name);
+        $this->assertBashSyntax($task->script, 'php update');
+        $this->assertStringContainsString('install --only-upgrade $PACKAGES', $task->script);
+        $this->assertStringContainsString("'php8.4-*'", $task->script);
+
+        $task->update(['status' => 'finished', 'exit_code' => 0, 'output' => "Now running PHP 8.4.2\n##DEPLOI_PHP_VERSION:8.4:8.4.2##\n"]);
+        (new PhpUpdated)->handle($task->fresh());
+        $this->assertSame('8.4.2', $server->fresh()->meta['php_patch_versions']['8.4']);
+        $this->get("/servers/{$server->id}/services")->assertSee('8.4.2');
+
+        // Only installed versions can be updated.
+        $this->post("/servers/{$server->id}/php/8.1/update")->assertNotFound();
     }
 
     public function test_site_lifecycle_create_install_deploy(): void

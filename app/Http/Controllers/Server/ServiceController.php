@@ -8,6 +8,7 @@ use App\Scripts\PhpScripts;
 use App\Scripts\ServerScripts;
 use App\Tasks\Callbacks\CliPhpChanged;
 use App\Tasks\Callbacks\PhpInstalled;
+use App\Tasks\Callbacks\PhpUpdated;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -42,6 +43,18 @@ class ServiceController extends Controller
         ]);
 
         return back()->with('success', "PHP {$data['version']} is being installed.");
+    }
+
+    public function updatePhp(Server $server, string $version)
+    {
+        abort_unless(in_array($version, $server->installed_php_versions ?? [], true), 404);
+
+        $server->runTask("Update PHP {$version}", PhpScripts::update($version), [
+            'on_finish' => PhpUpdated::class,
+            'timeout' => 1800,
+        ]);
+
+        return back()->with('success', "PHP {$version} is being updated to the latest patch release - follow it in the Task log.");
     }
 
     public function uninstallPhp(Server $server, string $version)

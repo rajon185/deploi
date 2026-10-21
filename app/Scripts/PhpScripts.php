@@ -64,6 +64,36 @@ systemctl restart php{$version}-fpm
 BASH;
     }
 
+    /** Prints ##DEPLOI_PHP_VERSION:8.4:8.4.2## so PhpUpdated can record the exact patch release. */
+    public static function reportVersion(string $version): string
+    {
+        return "echo \"##DEPLOI_PHP_VERSION:{$version}:\$(php{$version} -r 'echo PHP_VERSION;')##\"\n";
+    }
+
+    /** Upgrade an installed PHP version to the newest patch release (e.g. 8.4.1 -> 8.4.2) from the PPA. */
+    public static function update(string $version): string
+    {
+        return <<<BASH
+export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+APT="apt-get -y -o DPkg::Lock::Timeout=600 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+
+echo "Currently running PHP \$(php{$version} -r 'echo PHP_VERSION;')"
+\$APT update
+
+# Only the php{$version} packages that are actually installed - nothing new gets pulled in.
+PACKAGES=\$(dpkg-query -W -f='\${db:Status-Abbrev} \${Package}\\n' 'php{$version}-*' 2>/dev/null | awk '\$1 == "ii" { print \$2 }')
+if [ -z "\$PACKAGES" ]; then
+    echo "No PHP {$version} packages are installed."
+    exit 1
+fi
+
+\$APT install --only-upgrade \$PACKAGES
+systemctl reload php{$version}-fpm || systemctl restart php{$version}-fpm
+echo "Now running PHP \$(php{$version} -r 'echo PHP_VERSION;')"
+
+BASH.self::reportVersion($version);
+    }
+
     public static function uninstall(string $version): string
     {
         return <<<BASH
@@ -95,6 +125,7 @@ BASH;
     {
         return "APT=\"apt-get -y -o DPkg::Lock::Timeout=600 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold\"\n"
             .self::install($server, $version)
+            .self::reportVersion($version)
             ."echo 'PHP {$version} installed.'\n";
     }
 }

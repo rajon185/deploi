@@ -85,6 +85,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/services/{service}/{action}', [ServiceController::class, 'action'])->name('services.action');
         Route::post('/php', [ServiceController::class, 'installPhp'])->name('php.install');
         Route::post('/php/cli', [ServiceController::class, 'setCliPhp'])->name('php.cli');
+        Route::post('/php/{version}/update', [ServiceController::class, 'updatePhp'])->name('php.update');
         Route::delete('/php/{version}', [ServiceController::class, 'uninstallPhp'])->name('php.uninstall');
 
         Route::get('/discover', [DiscoveryController::class, 'show'])->name('discover');

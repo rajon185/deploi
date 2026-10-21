@@ -30,10 +30,12 @@
                         <li class="flex items-center justify-between px-5 py-3">
                             <div class="flex items-center gap-2">
                                 <span class="font-medium">PHP {{ $version }}</span>
+                                @if($installed && ($patch = $server->meta['php_patch_versions'][$version] ?? null))<span class="font-mono text-xs text-slate-500">{{ $patch }}</span>@endif
                                 @if($server->php_version === $version)<x-badge status="active">CLI default</x-badge>@endif
                             </div>
                             <div class="flex gap-2">
                                 @if($installed)
+                                    <form method="POST" action="{{ route('servers.php.update', [$server, $version]) }}">@csrf<button class="btn btn-secondary btn-sm" title="Upgrade to the newest {{ $version }}.x release from the PPA">Update</button></form>
                                     @if($server->php_version !== $version)
                                         <form method="POST" action="{{ route('servers.php.cli', $server) }}">@csrf<input type="hidden" name="version" value="{{ $version }}"><button class="btn btn-secondary btn-sm">Make CLI default</button></form>
                                         <x-delete-button :action="route('servers.php.uninstall', [$server, $version])" label="Uninstall" :confirm="'Uninstall PHP '.$version.'?'" class="btn btn-secondary btn-sm !text-red-600" />
@@ -48,7 +50,7 @@
                 <p class="border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
                     The CLI default only changes the plain <span class="code">php</span> command (and the default for new sites).
                     Each site keeps its own version - used by Nginx and by <span class="code">$DEPLOI_PHP</span> / <span class="code">$DEPLOI_COMPOSER</span> in deploys - so change it under Site → Settings.
-                    Packages come from the ondrej/php PPA.
+                    Packages come from the ondrej/php PPA. <strong>Update</strong> installs the newest patch release of that version (e.g. 8.4.1 &rarr; 8.4.2) and reloads its FPM pool - sites don't need redeploying.
                 </p>
                 @php($sitesOnPhp = $server->sites()->get()->groupBy(fn ($s) => $s->phpVersion())->map->count())
                 @if($sitesOnPhp->isNotEmpty())
